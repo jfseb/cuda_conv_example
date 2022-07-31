@@ -103,6 +103,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="conv_kernel.cuh" />
+    <ClInclude Include="conv_kernel_expand.cuh" />
+    <ClInclude Include="types.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
