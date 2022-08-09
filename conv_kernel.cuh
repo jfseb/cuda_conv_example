@@ -400,6 +400,227 @@ void U8_NEXT_NB_V(const uint8_t* src, int& i, int length, UChar32& r) {
   U8_NEXT_NB_i(src, i, length, r, true);
 }
 
+/// <summary>
+///  this follows the ICU macro 
+/// </summary>
+/// <param name="src"></param>
+/// <param name="i"></param>
+/// <param name="length"></param>
+/// <param name="r"></param>
+/// <param name="verbose"></param>
+void U8_NEXT_NB_2(const uint8_t* src, int& i, int length, UChar32& r, bool verbose) {
+  const UChar32 UC_REPL = 0xFFFD;
+  if (length - i < 4) {
+    U8_NEXT(src, i, length, r);
+    return;
+  }
+
+
+  /**
+   * Internal bit vector for 3-byte UTF-8 validity check, for use in U8_IS_VALID_LEAD3_AND_T1.
+   * Each bit indicates whether one lead byte + first trail byte pair starts a valid sequence.
+   * Lead byte E0..EF bits 3..0 are used as byte index,
+   * first trail byte bits 7..5 are used as bit index into that byte.
+   * @see U8_IS_VALID_LEAD3_AND_T1
+   * @internal
+   */
+#define U8_LEAD3_T1_BITS "\x20\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x10\x30\x30"
+
+   /**
+    * Internal bit vector for 4-byte UTF-8 validity check, for use in U8_IS_VALID_LEAD4_AND_T1.
+    * Each bit indicates whether one lead byte + first trail byte pair starts a valid sequence.
+    * First trail byte bits 7..4 are used as byte index,
+    * lead byte F0..F4 bits 2..0 are used as bit index into that byte.
+    * @see U8_IS_VALID_LEAD4_AND_T1
+    * @internal
+    */
+#define U8_LEAD4_T1_BITS "\x00\x00\x00\x00\x00\x00\x00\x00\x1E\x0F\x0F\x0F\x00\x00\x00\x00"
+
+  const uint8_t maskL6 = 0b11111110;
+  const uint8_t mtchL6 = 0b11111100;
+  const uint8_t maskL5 = 0b11111100;
+  const uint8_t mtchL5 = 0b11111000;
+  const uint8_t maskL4 = 0b11111000;
+  const uint8_t mtchL4 = 0b11110000;
+  const uint8_t chk1L4 = 0b00000111;
+  const uint8_t chkZL4 = 0b00000111;
+  const uint8_t maskL3 = 0b11110000;
+  const uint8_t mtchL3 = 0b11100000;
+  const uint8_t chk1L3 = 0b00001111;
+  const uint8_t chkZL3 = 0b00000111;
+  const uint8_t maskL2 = 0b11100000;
+  const uint8_t mtchL2 = 0b11000000;
+  const uint8_t chk1L2 = 0b00011110; // ! only 1 is non-minimal
+  const uint8_t maskFl = 0b11000000;
+  const uint8_t mtchFl = 0b10000000;
+  const uint8_t maskL1 = 0b10000000;
+  const uint8_t mtchL1 = 0b00000000;
+
+  const uint8_t chk1Fl = 0b00100000; // mask 1 leading data bit in a follow sequence
+  const uint8_t chk2Fl = 0b00110000; // mask 2 leading data bits in a follow sequence
+
+#define AnyLeadDataBitSet(X,c) (!!(c & chk##X##Fl))
+#define IsLeadZero(X,c) ( !(c& chkZ##X) )
+
+#define Is(X,c)  !((c & mask##X) ^ mtch##X)
+#define IsNz(X,c)  (!!(c & chk1##X))
+
+// the bits in the mask must be exactly the value
+#define IsMV(c, mask,value) (!( (c & mask ) - value))
+
+  // h2-h6 header bits indicate 2-6 byte sequence
+
+#define IsGE(tst,val) (!( ((tst)-(val)) & 0x80))
+#define IsLT(tst,val) (!!( ((tst)-(val)) & 0x80))
+#define IsLE(tst,val) (!( ((val)- (tst)) & 0x80))
+
+  uint8_t c0 = src[i];
+  uint8_t c1 = src[i + 1];
+  uint8_t c2 = src[i + 2];
+  uint8_t c3 = src[i + 3];
+
+  bool isSingle = Is(L1, c0);
+  bool isGE_0xe0 = IsGE(c0, 0xe0);
+  bool isLT_0xf0 = IsLT(c0, 0xF0);
+  bool isGE_0xc2 = IsGE(c0, 0xC2);
+
+  bool isTrail2 = Is(Fl, c1);
+  bool isTrail3 = Is(Fl, c2);
+  bool isTrail4 = Is(Fl, c3);
+
+  // 
+  bool isOkLead3 = U8_LEAD3_T1_BITS[c0 & 0xf] & ( 1 << (c1 >> 5));
+  
+  bool isU4_1 = !isLT_0xf0 && IsLE(c0 - 0xf0, 0x04);
+
+  bool isOkLead4 = U8_LEAD4_T1_BITS[c1 >> 4] & (1 << (c0 & 7));
+
+  bool is_U4_2ok = isU4_1 && isOkLead4 && (((c0 - 0xf0) << 6) | (c1 & 0x3f));
+  bool isU4_3 = is_U4_2ok && isTrail3;
+
+  bool isOkLead2 = isGE_0xc2;
+
+  bool i1 = isSingle;
+
+  bool i4_1 = !i1 && isGE_0xe0 && !isLT_0xf0 && isU4_1;
+  bool i4_2 = !i1 && isGE_0xe0 && !isLT_0xf0 && isU4_1 && is_U4_2ok;
+  bool i4_3 = i4_2 && isTrail3;
+  bool i4 = i4_3 && isTrail4;
+  bool i3_1 = !i1 && isGE_0xe0 && isLT_0xf0;
+  bool i3_2 = !i1 && isGE_0xe0 && isLT_0xf0 && isOkLead3;
+  bool i3 = i3_2 && isTrail3;
+  bool i2_1 = !i1 && !isGE_0xe0 && isOkLead2;
+  bool i2 = i2_1 && isTrail2;
+
+
+
+  bool err3 = (i4_3 && !i4);
+  bool err2 = (i4_2 && !i4_3) || (i3_2 && !i3);
+  bool err = !(i1 || i2 || i3 || i4); 
+  /*
+              && (err3 || err2
+                || (!i2_1 && !i3_1 && !i4_1 )
+                || (i2_1 && !i2) 
+                || (i4_1 && !i4_2)
+                || (i3_1 && !i3_2));*/
+
+  offsets__t advance = i1 * 1 + i2 * 2 + i3 * 3 + i4 * 4
+    + err * 1
+    + err2 * 1
+    + err3 * 2;
+  +0;
+
+  if (verbose) {
+    std::cout << " isLE(" << i << " err=" << err << " adv=" << advance << std::endl;
+
+
+    std::cout << " i=" << i << " err=" << err << " adv=" << advance << std::endl;
+    std::cout << " i1="<< i1 << "/i2=" << i2 << "/i3=" << i3 << "/i4=" << i4 << std::endl;
+    std::cout << " !isGE_0xe0 " << !isGE_0xe0 << " isOkLead2 " << isOkLead2 << "isLT_0xf0 = " << isLT_0xf0 << std::endl;
+    std::cout << " i1/2/3/4     "
+      << i1 << "/" << i2 << "/" << i3 << "/" << i4 << std::endl;
+    std::cout << "-" << "/err=" << err << "/err2=" << err2 << "/err3=" << err3 << std::endl;
+    std::cout << " isOkLead3 " << isOkLead3 << std::endl;
+    std::cout << " i1 " << i1 << std::endl;
+    std::cout << " i2 " << i2 << " i2_1=" << i2_1 << std::endl;
+    std::cout << " i3 " << i3 << " i3_1=" << i3_1 << " i3_2=" << i3_2 << " isTrail3=" << isTrail3 << " isOkLead3 " << isOkLead3 << std::endl;
+    std::cout << " i4 " << i4 << " i4_1=" << i4_1 << " i4_2=" << i4_2 << " i4_3=" << i4_3 << " isTrail4=" << isTrail4 
+      << " is_U4_2ok=" << is_U4_2ok << " isOkLead4 = " << isOkLead4 << " isU4_1 = " << isU4_1 << std::endl;
+  }
+
+    r = i1 * c0
+      + i2 * (V2_0(c0) + V2_1(c1))
+      + i3 * (V3_0(c0) + V3_1(c1) + V3_2(c2))
+      + i4 * (V4_0(c0) + V4_1(c1) + V4_2(c2) + V4_3(c3))
+      + err * (-1); // Neg = error;
+    i += advance;
+
+
+/*        if (verbose) {
+          std::cout << " i=" << i << " err=" << err << " adv=" << advance << std::endl;
+          std::cout << i1 << "/" << i2 << "/" << i3 << "/" << i4 << std::endl;
+          std::cout << " i1/2/3/4     "
+            << i1 << "/" << i2 << "/" << i3 << "/" << i4 << std::endl;
+          std::cout << " h-/2/3/4/5/6 "
+            << "-" << "/" << h2 << "/" << h3 << "/" << h4 << "/" << h5 << "/" << h6 << std::endl;
+          std::cout << " o-/2/3/4     "
+            << "-" << "/" << o2 << "/" << o3 << "/" << o4 << std::endl;
+          std::cout << "o4NM" << o4NonMinimal << " c1= " << c1 <<
+            " IsMV(c1, 0b00111000, 0b00000000) " << IsMV(c1, 0b00111000, 0b00000000) << " ";
+          std::cout << " c1 & " << (int)(c1 & 0b00111000) << " " << !(int)(c1 & 0b001111000) << std::endl;
+          std::cout << "\n overflow" << o4Overflow << " " <<
+            (!IsMV(c1, 0b00110000, 0b00000000)) << std::endl;
+
+          std::cout << " IS Surr" << isSurrogate << " ff ed " << IsMV(c0, 0xFF, 0xED) << " " << IsMV(c1, 0x20, 0x20) << std::endl;
+          std::cout << " o4 = " << "IsMV(c1, 0b00011111, 0b00010000)" << IsMV(c1, 0b00011111, 0b00010000) << "!IsMV(c1, 0b00010000, 0b00000000)" << !IsMV(c1, 0b00010000, 0b00000000) << std::endl;
+          std::cout << " (IsLeadZero(L3, c0) && AnyLeadDataBitSet(1,c1));" << IsLeadZero(L3, c0) << AnyLeadDataBitSet(1, c1) << std::endl;
+          std::cout << " extraskip (Is(L3, c0) && Is(Fl, c1) && !Is(Fl, c2)) << "
+            << Is(L3, c0) << " && " << Is(Fl, c1) << " && " << !Is(Fl, c2) << std::endl;
+        } */
+  /*
+  *  ++i ! 
+  if (!U8_IS_SINGLE(c)) {
+    \
+      uint8_t __t = 0; \
+      if ((i) != (length) && \
+        / * fetch/validate/assemble all but last trail byte * / \
+        ((c) >= 0xe0 ? \
+          ((c) < 0xf0 ?  / * U+0800..U+FFFF except surrogates * / \
+              U8_LEAD3_T1_BITS[(c) &= 0xf] & (1 << ((__t = (s)[i]) >> 5)) && \
+              (__t &= 0x3f, 1) \
+            :  / * U+10000..U+10FFFF * / \
+              ((c) -= 0xf0) <= 4 && \
+              U8_LEAD4_T1_BITS[(__t = (s)[i]) >> 4] & (1 << (c)) && \
+              ((c) = ((c) << 6) | (__t & 0x3f), ++(i) != (length)) && \
+               (__t = (s)[i] - 0x80) <= 0x3f)
+            && 
+             / * valid second-to-last trail byte * / \
+             ((c) = ((c) << 6) | __t, ++(i) != (length)) \
+          :  / * U+0080..U+07FF * / \
+          (c) >= 0xc2 && ((c) &= 0x1f, 1))
+        && \
+        / * last trail byte * / \
+        (__t = (s)[i] - 0x80) <= 0x3f && \
+        ((c) = ((c) << 6) | __t, ++(i), 1)) {
+        \
+      }
+      else {
+        \
+          (c) = (sub);  / * ill-formed* / \
+      } \
+
+        */
+}
+
+
+void U8_NEXT_NB_V2_V(const uint8_t* src, int& i, int length, UChar32& r) {
+  U8_NEXT_NB_2(src, i, length, r, true);
+}
+
+void U8_NEXT_NB_V2(const uint8_t* src, int& i, int length, UChar32& r) {
+  U8_NEXT_NB_2(src, i, length, r, false);
+}
+
 
 __device__ void convU8_NEXT_NOBRANCH(const uint8_t* src, int& i, int length, UChar32& r, bool& flawed) {
   const UChar32 UC_REPL = 0xFFFD;
@@ -509,10 +730,43 @@ __device__ void convU8_NEXT_NOBRANCH(const uint8_t* src, int& i, int length, UCh
           + IMUL(err,UC_REPL); // Neg = error;
    flawed |= err;
    i += advance;
+}
 
-#ifdef OLD
+/// <summary>
+///  follow the U8_NEXT computation
+/// </summary>
+/// <param name="src"></param>
+/// <param name="i"></param>
+/// <param name="length"></param>
+/// <param name="r"></param>
+/// <param name="flawed"></param>
+/// <returns></returns>
+__device__ void convU8_NEXT_NOBRANCH2(const uint8_t* src, int& i, int length, UChar32& r, bool& flawed) {
+  const UChar32 UC_REPL = 0xFFFD;
+  if (length - i < 4) {
+    U8_NEXT(src, i, length, r);
+    return;
+  }
 
+  /**
+   * Internal bit vector for 3-byte UTF-8 validity check, for use in U8_IS_VALID_LEAD3_AND_T1.
+   * Each bit indicates whether one lead byte + first trail byte pair starts a valid sequence.
+   * Lead byte E0..EF bits 3..0 are used as byte index,
+   * first trail byte bits 7..5 are used as bit index into that byte.
+   * @see U8_IS_VALID_LEAD3_AND_T1
+   * @internal
+   */
+#define U8_LEAD3_T1_BITS "\x20\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x30\x10\x30\x30"
 
+   /**
+    * Internal bit vector for 4-byte UTF-8 validity check, for use in U8_IS_VALID_LEAD4_AND_T1.
+    * Each bit indicates whether one lead byte + first trail byte pair starts a valid sequence.
+    * First trail byte bits 7..4 are used as byte index,
+    * lead byte F0..F4 bits 2..0 are used as bit index into that byte.
+    * @see U8_IS_VALID_LEAD4_AND_T1
+    * @internal
+    */
+#define U8_LEAD4_T1_BITS "\x00\x00\x00\x00\x00\x00\x00\x00\x1E\x0F\x0F\x0F\x00\x00\x00\x00"
 
   const uint8_t maskL6 = 0b11111110;
   const uint8_t mtchL6 = 0b11111100;
@@ -521,64 +775,99 @@ __device__ void convU8_NEXT_NOBRANCH(const uint8_t* src, int& i, int length, UCh
   const uint8_t maskL4 = 0b11111000;
   const uint8_t mtchL4 = 0b11110000;
   const uint8_t chk1L4 = 0b00000111;
+  const uint8_t chkZL4 = 0b00000111;
   const uint8_t maskL3 = 0b11110000;
   const uint8_t mtchL3 = 0b11100000;
   const uint8_t chk1L3 = 0b00001111;
+  const uint8_t chkZL3 = 0b00000111;
   const uint8_t maskL2 = 0b11100000;
   const uint8_t mtchL2 = 0b11000000;
-  const uint8_t chk1L2 = 0b00011111;
+  const uint8_t chk1L2 = 0b00011110; // ! only 1 is non-minimal
   const uint8_t maskFl = 0b11000000;
   const uint8_t mtchFl = 0b10000000;
   const uint8_t maskL1 = 0b10000000;
   const uint8_t mtchL1 = 0b00000000;
 
+  const uint8_t chk1Fl = 0b00100000; // mask 1 leading data bit in a follow sequence
+  const uint8_t chk2Fl = 0b00110000; // mask 2 leading data bits in a follow sequence
+
+#define AnyLeadDataBitSet(X,c) (!!(c & chk##X##Fl))
+#define IsLeadZero(X,c) ( !(c& chkZ##X) )
+
 #define Is(X,c)  !((c & mask##X) ^ mtch##X)
 #define IsNz(X,c)  (!!(c & chk1##X))
 
-  bool h6 = Is(L6, c0);
-  bool h5 = Is(L5, c0);
-  bool h4 = Is(L4, c0);
-  bool o4 = IsNz(L4, c0);
-  bool i4 = Is(L4, c0) && Is(Fl, c1) && Is(Fl, c2) && Is(Fl, c3) && o4;
-  bool h3 = Is(L3, c0);
-  bool o3 = IsNz(L3, c0);
-  bool i3 = Is(L3, c0) && Is(Fl, c1) && Is(Fl, c2) && o3;
-  bool h2 = Is(L2, c0);
-  bool o2 = IsNz(L2, c0);
-  bool i2 = Is(L2, c0) && Is(Fl, c1) && o2;
-  bool i1 = Is(L1, c0);
-  bool hf = Is(Fl, c0);
+// the bits in the mask must be exactly the value
+#define IsMV(c, mask,value) (!( (c & mask ) - value))
 
-#define V4_0(c)    (((UChar32) c &0b00000111 ) <<  (18))
-#define V4_1(c)    (((UChar32) c &0b00111111 ) <<  (12))
-#define V4_2(c)    (((UChar32) c &0b00111111 ) <<  (6))
-#define V4_3(c)    (((UChar32) c &0b00111111 ) <<  (0))
+  // h2-h6 header bits indicate 2-6 byte sequence
 
-#define V3_0(c)    (((UChar32) c &0b00001111 ) <<  (12))
-#define V3_1(c)    (((UChar32) c &0b00111111 ) <<  (6))
-#define V3_2(c)    (((UChar32) c &0b00111111 ) <<  (0))
+#define IsGE(tst,val) (!( ((tst)-(val)) & 0x80))
+#define IsLT(tst,val) (!!( ((tst)-(val)) & 0x80))
+#define IsLE(tst,val) (!( ((val)- (tst)) & 0x80))
 
-#define V2_0(c)    (((UChar32) c &0b00011111 ) <<  (6))
-#define V2_1(c)    (((UChar32) c &0b00111111 ) <<  (0))
+  uint8_t c0 = src[i];
+  uint8_t c1 = src[i + 1];
+  uint8_t c2 = src[i + 2];
+  uint8_t c3 = src[i + 3];
 
-#define V1_0(c)    (((UChar32) c &0b01111111 ) <<  (0))
-  // icu varies in error handling
-  // on "skipping" bytes, for e2 82 *41 fx with * beeing an unexpected non tail
-  // it skips 2 chars (e2 82), re adjusting at 41 together
-  //
-  //
-  bool err = (h2 && !i2) || (h3 && !i3) || (h4 && !i4) || hf || h5 || h6;
-  flawed |= err;
+  bool isSingle = Is(L1, c0);
+  bool isGE_0xe0 = IsGE(c0, 0xe0);
+  bool isLT_0xf0 = IsLT(c0, 0xF0);
+  bool isGE_0xc2 = IsGE(c0, 0xC2);
+
+  bool isTrail2 = Is(Fl, c1);
+  bool isTrail3 = Is(Fl, c2);
+  bool isTrail4 = Is(Fl, c3);
+
+  // 
+  bool isOkLead3 = U8_LEAD3_T1_BITS[c0 & 0xf] & (1 << (c1 >> 5));
+
+  bool isU4_1 = !isLT_0xf0 && IsLE(c0 - 0xf0, 0x04);
+
+  bool isOkLead4 = U8_LEAD4_T1_BITS[c1 >> 4] & (1 << (c0 & 7));
+
+  bool is_U4_2ok = isU4_1 && isOkLead4 && (((c0 - 0xf0) << 6) | (c1 & 0x3f));
+  bool isU4_3 = is_U4_2ok && isTrail3;
+
+  bool isOkLead2 = isGE_0xc2;
+
+  bool i1 = isSingle;
+
+  bool i4_1 = !i1 && isGE_0xe0 && !isLT_0xf0 && isU4_1;
+  bool i4_2 = i4_1 && is_U4_2ok;
+  bool i4_3 = i4_2 && isTrail3;
+  bool i4 = i4_3 && isTrail4;
+  bool i3_1 = !i1 && isGE_0xe0 && isLT_0xf0;
+  bool i3_2 = !i1 && isGE_0xe0 && isLT_0xf0 && isOkLead3;
+  bool i3 = i3_2 && isTrail3;
+  bool i2_1 = !i1 && !isGE_0xe0 && isOkLead2;
+  bool i2 = i2_1 && isTrail2;
+
+
+
+  bool err3 = (i4_3 && !i4);
+  bool err2 = (i4_2 && !i4_3) || (i3_2 && !i3);
+  bool err = !(i1 || i2 || i3 || i4);
+  /*
+              && (err3 || err2
+                || (!i2_1 && !i3_1 && !i4_1 )
+                || (i2_1 && !i2)
+                || (i4_1 && !i4_2)
+                || (i3_1 && !i3_2));*/
+
   offsets__t advance = i1 * 1 + i2 * 2 + i3 * 3 + i4 * 4
     + err * 1
-    + 1 * (Is(L3, c0) && Is(Fl, c1) && !Is(Fl, c2));
+    + err2 * 1
+    + err3 * 2;
+  //
   r = i1 * c0
-    + i2 * (V2_0(c0) + V2_1(c1))
-    + i3 * (V3_0(c0) + V3_1(c1) + V3_2(c2))
+    + IMUL(i2, (V2_0(c0) + V2_1(c1)))
+    + IMUL(i3, (V3_0(c0) + V3_1(c1) + V3_2(c2)))
     + i4 * (V4_0(c0) + V4_1(c1) + V4_2(c2) + V4_3(c3))
-    + err * UC_REPL; // Neg = error;
+    + IMUL(err, UC_REPL); // Neg = error;
+  flawed |= err;
   i += advance;
-#endif
 }
 
 
@@ -797,9 +1086,67 @@ const char* kernel_8 = "GPU_016_U8_NOBR_000_256";
 #include "conv_kernel_expand.cuh"
 #undef NO_WRITE
 
+
 // buffer lengths
-const char* kernel_9 = "GP2_001_U8_NOBR_000_016";
-#define NR 15
+const char* kernel_9 = "GP2_001_U8_NOBR_000_000";
+#define NR 9
+#define SINP 000
+#define SOUT 0
+#define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_000NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_000NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
+
+// buffer lengths
+const char* kernel_10 = "GP2_001_U8_NOBR_000_004";
+#define NR 10
+#define SINP 000
+#define SOUT 4
+#define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_004NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_004NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
+
+
+// buffer lengths
+const char* kernel_11 = "GP2_001_U8_NOBR_000_008";
+#define NR 11
+#define SINP 000
+#define SOUT 8
+#define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_008NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_008NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
+// buffer lengths
+const char* kernel_12 = "GP2_001_U8_NOBR_000_016";
+#define NR 12
 #define SINP 000
 #define SOUT 016
 #define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
@@ -816,8 +1163,8 @@ const char* kernel_9 = "GP2_001_U8_NOBR_000_016";
 #undef NO_OFFSET
 
 // buffer lengths
-const char* kernel_10 = "GP2_001_U8_NOBR_000_032";
-#define NR 15
+const char* kernel_13 = "GP2_001_U8_NOBR_000_032";
+#define NR 13
 #define SINP 000
 #define SOUT 032
 #define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
@@ -833,8 +1180,8 @@ const char* kernel_10 = "GP2_001_U8_NOBR_000_032";
 #undef NO_WRITE
 #undef NO_OFFSET
 // buffer lengths
-const char* kernel_11 = "GP2_001_U8_NOBR_000_064";
-#define NR 15
+const char* kernel_14 = "GP2_001_U8_NOBR_000_064";
+#define NR 14
 #define SINP 000
 #define SOUT 064
 #define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
@@ -846,58 +1193,6 @@ const char* kernel_11 = "GP2_001_U8_NOBR_000_064";
 #define NO_WRITE
 #undef NO_OFFSET
 #define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
-#include "conv_kernel_expand.cuh"
-#undef NO_WRITE
-#undef NO_OFFSET
-
-const char* kernel_12 = "GP2_001_U8_NEXT_000_256";
-#define NR 12
-#define SINP 000
-#define SOUT 256
-#define NEXT_CHAR(s,i,length,c, fl) U8_NEXT(s, i, length, c); if (c < 0) { fl = 1; c = UC_REPL; }
-#define STRPERTHREAD 001
-#undef NO_WRITE
-#define NO_OFFSET
-#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
-#include "conv_kernel_expand.cuh"
-#define NO_WRITE
-#undef NO_OFFSET
-#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
-#include "conv_kernel_expand.cuh"
-#undef NO_WRITE
-#undef NO_OFFSET
-
-const char* kernel_13 = "GP2_001_U8_NEXT_000_128";
-#define NR 13
-#define SINP 000
-#define SOUT 128
-#define NEXT_CHAR(s,i,length,c, fl) U8_NEXT(s, i, length, c); if (c < 0) { fl = 1; c = UC_REPL; }
-#define STRPERTHREAD 001
-#undef NO_WRITE
-#define NO_OFFSET
-#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
-#include "conv_kernel_expand.cuh"
-#define NO_WRITE
-#undef NO_OFFSET
-#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
-#include "conv_kernel_expand.cuh"
-#undef NO_WRITE
-#undef NO_OFFSET
-
-
-const char* kernel_14 = "GP2_001_U8_NOBR_000_256";
-#define NR 14
-#define SINP 000
-#define SOUT 256
-#define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
-#define STRPERTHREAD 001
-#undef NO_WRITE
-#define NO_OFFSET
-#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
-#include "conv_kernel_expand.cuh"
-#define NO_WRITE
-#undef NO_OFFSET
-#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
 #include "conv_kernel_expand.cuh"
 #undef NO_WRITE
 #undef NO_OFFSET
@@ -919,6 +1214,78 @@ const char* kernel_15 = "GP2_001_U8_NOBR_000_128";
 #include "conv_kernel_expand.cuh"
 #undef NO_WRITE
 #undef NO_OFFSET
+
+const char* kernel_16 = "GP2_001_U8_NOBR_000_256";
+#define NR 16
+#define SINP 000
+#define SOUT 256
+#define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH(s, i, length, c, fl)
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
+
+
+const char* kernel_17 = "GP2_001_U8_NEXT_000_256";
+#define NR 17
+#define SINP 000
+#define SOUT 256
+#define NEXT_CHAR(s,i,length,c, fl) U8_NEXT(s, i, length, c); if (c < 0) { fl = 1; c = UC_REPL; }
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
+const char* kernel_18 = "GP2_001_U8_NEXT_000_128";
+#define NR 18
+#define SINP 000
+#define SOUT 128
+#define NEXT_CHAR(s,i,length,c, fl) U8_NEXT(s, i, length, c); if (c < 0) { fl = 1; c = UC_REPL; }
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
+
+const char* kernel_19 = "GP2_001_U8_NOB2_000_032";
+#define NR 19
+#define SINP 000
+#define SOUT 32
+#define NEXT_CHAR(s,i,length,c, fl) convU8_NEXT_NOBRANCH2(s, i, length, c, fl)
+#define STRPERTHREAD 001
+#undef NO_WRITE
+#define NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOB2_000_032NO(const uint8_t* src, const int* srcOffsets, int nrStringN, UChar32* dest0, const int* dO) {
+#include "conv_kernel_expand.cuh"
+#define NO_WRITE
+#undef NO_OFFSET
+#define signature __global__ void convUTF8_UCHAR32_kernelGP2_001_U8_NOB2_000_032NW(const uint8_t* src, const int* srcOffsets, int nrStringN, int* dO, int* flawed) {
+#include "conv_kernel_expand.cuh"
+#undef NO_WRITE
+#undef NO_OFFSET
+
 
 // the shift is a special form of a scan.
 // if we store length, not offsets in the target array, we can use a simple scan to produce the final array

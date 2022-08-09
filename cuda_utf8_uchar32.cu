@@ -732,6 +732,7 @@ void checkU8_NEXT() {
     0xF0, 0x82, 0x82, 0xAC, // overlong 3-byte
     0xF0, 0x88, 0x98, 0x80, // non-minimal
     0xf0, 0xa0, 0x80, 0x84, // ok
+    0xf0, 0x90, 0x80, 0x00,
     0xf0, 0x90, 0x00, 'A', // skip 2
     0xF2, 0x9F, 0x98, 0x80,
     0xF4, 0x9F, 0x98, 0x80, // 11F600
@@ -739,6 +740,7 @@ void checkU8_NEXT() {
     0b11100000, 0b10111111, 
     0b10111111, // minimal!   (zero & leadc2) || (nonzero
     0b11000001, 0b10000000, // non-minimal! -> error, same as 0x01000000
+
     0xf0, 0x9f, 0x98, 0x80, // this is *not* non-minimal!
     0xf4, 0x9f, 0x98, 0x80,
     0x00, 0x00, 0x00, 0x00
@@ -755,13 +757,15 @@ void checkU8_NEXT() {
     U8_NEXT(s, i1, len, c1);
     int i2 = i;
     UChar32 c2 = 0;
-    U8_NEXT_NB(s, i2, len, c2);
+    U8_NEXT_NB_V2(s, i2, len, c2);
     if (i1 != i2 || c2 != c1) {
       std::ios_base::fmtflags fmtflags(std::cout.flags());
       {
+        std::cout << "Processing ..." << std::endl;
         int i3 = i;
         UChar32 c3 = 0;
-        U8_NEXT_NB_V(s, i3, len, c3);
+        //U8_NEXT_NB_V(s, i3, len, c3);
+        U8_NEXT_NB_V2_V(s, i3, len, c3);
       }
       int b0 = s[i]; int b1 = s[i + 1]; int b2 = s[i + 2]; int b3 = s[i + 3];
       std::cout << "diff for " << std::hex << b0 << " " << b1 << " " << b2 << " " << b3 << std::endl;
@@ -772,7 +776,7 @@ void checkU8_NEXT() {
     }
   }
   std::cout.flush();
-  bool full_verify = false;
+  bool full_verify = true;
   if (full_verify) {
     // there are only 0x10FFFF million uc characters (and 256^4 4 byte sequences) just test them all :-)
     // 
@@ -792,13 +796,13 @@ void checkU8_NEXT() {
             U8_NEXT(sall, i1, len, c1);
             int i2 = 0;
             UChar32 c2 = 0;
-            U8_NEXT_NB(sall, i2, len, c2);
+            U8_NEXT_NB_V2(sall, i2, len, c2);
             if ( i1 != i2 || c2 != c1) {
               ++err; 
               i2 = 0;
               c2 = 0;
               std::ios_base::fmtflags fmtflags(std::cout.flags());
-              U8_NEXT_NB_V(sall, i2, len, c2);
+              U8_NEXT_NB_V2_V(sall, i2, len, c2);
               std::cout << "diff for " << std::hex << b0 << " " <<  b1 << " " << b2 << " " << b3 << std::endl;
               std::cout << std::resetiosflags(fmtflags);
               std::cout << "U8_NEXT " << i1 << " " << std::hex << c1 << std::endl;
@@ -917,10 +921,6 @@ Output convGPU(const InputData& input, int verbose, StopWatchInterface* hTimer, 
   res.data = (dst_char_t*)smalloc(sizeof(dst_char_t) * nrStrings * avgLen);
   res.offs = (offsets__t*)smalloc(sizeof(offsets__t) * (nrStrings + 1));
 
-  //
-  //dst_char_t* h_dstData_GPU = (UChar32*)malloc(sizeof(UChar32) * input.nrStrings * input.avgLen);
-  //indexoff_t* h_dstOffs_GPU = (int*)malloc(sizeof(int) * (input.nrStrings + 1));
-
   int* h_flawed_GPU = (int*)smalloc(sizeof(int) * 1);
 
   (verbose > 3) && printf("...allocating GPU memory.\n");
@@ -1031,38 +1031,38 @@ Output convGPU(const InputData& input, int verbose, StopWatchInterface* hTimer, 
   case 9:
     res.name = std::string(kernel_9);
     // produces only the offset array
-    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_016NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
-    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_016NW() execution failed\n");
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_000NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_000NW() execution failed\n");
     break;
   case 10:
     res.name = std::string(kernel_10);
     // produces only the offset array
-    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_032NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
-    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_032NW() execution failed\n");
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_004NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_004NW() execution failed\n");
     break;
   case 11:
     res.name = std::string(kernel_11);
     // produces only the offset array
-    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
-    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NW() execution failed\n");
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_008NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_008NW() execution failed\n");
     break;
   case 12:
     res.name = std::string(kernel_12);
     // produces only the offset array
-    convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
-    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW() execution failed\n");
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_016NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_016NW() execution failed\n");
     break;
- case 13:
+  case 13:
     res.name = std::string(kernel_13);
     // produces only the offset array
-    convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
-    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW() execution failed\n");
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_032NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_032NW() execution failed\n");
     break;
   case 14:
-      res.name = std::string(kernel_14);
-      // produces only the offset array
-      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
-      getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW() execution failed\n");
+    res.name = std::string(kernel_14);
+    // produces only the offset array
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NW() execution failed\n");
     break;
   case 15:
     res.name = std::string(kernel_15);
@@ -1070,6 +1070,31 @@ Output convGPU(const InputData& input, int verbose, StopWatchInterface* hTimer, 
     convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_128NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
     getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW() execution failed\n");
    break;
+  case 16:
+    res.name = std::string(kernel_16);
+    // produces only the offset array
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NW() execution failed\n");
+    break;
+    break;
+  case 17:
+    res.name = std::string(kernel_17);
+    // produces only the offset array
+    convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW() execution failed\n");
+    break;
+  case 18:
+    res.name = std::string(kernel_18);
+    // produces only the offset array
+    convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NW() execution failed\n");
+    break;
+  case 19:
+    res.name = std::string(kernel_19);
+    // produces only the offset array
+    convUTF8_UCHAR32_kernelGP2_001_U8_NOB2_000_032NW << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstOffs, d_flawed);
+    getLastCudaError("convUTF8_UCHAR32_kernelGP2_001_U8_NOB2_000_032NW() execution failed\n");
+    break;
   default:
     res.name = std::string(kernel_4);
     convUTF8_UCHAR32_kernelGPU_001_U8_NOBR_000_256 << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffs, d_flawed);
@@ -1088,7 +1113,7 @@ Output convGPU(const InputData& input, int verbose, StopWatchInterface* hTimer, 
 #define DEVICE_COALESCE 0
 
   if (kernelNr >= 9 
-    && kernelNr <= 15)
+    && kernelNr <= 19)
   {
     thrust::plus<int> binary_op;
     thrust::device_ptr<offsets__t> dptr_dstOffs(d_dstOffs);
@@ -1132,25 +1157,37 @@ Output convGPU(const InputData& input, int verbose, StopWatchInterface* hTimer, 
     }
     switch (kernelNr) {
     case  9:
-      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_016NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_000NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
-    case 10:
-      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_032NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+    case  10:
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_004NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
-    case 11:
-      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+    case  11:
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_008NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
     case 12:
-      convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_016NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
     case 13:
-      convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_032NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
     case 14:
-      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_064NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
     case 15:
       convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_128NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      break;
+    case 16:
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOBR_000_256NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      break;
+    case 17:
+      convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_256NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      break;
+    case 18:
+      convUTF8_UCHAR32_kernelGP2_001_U8_NEXT_000_128NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
+      break;
+    case 19:
+      convUTF8_UCHAR32_kernelGP2_001_U8_NOB2_000_032NO << <grid, block >> > (d_srcData, d_srcOffs, nrStrings, d_dstData, d_dstOffsC2);
       break;
     default:
       exit(-1);
@@ -1335,12 +1372,12 @@ int main(int argc, char** argv) {
   (verbose > 3) && printf("...allocating CPU memory.\n");
 
   if (dataFilter.length() == 0) {
-    // create a small input data
+    // create a small input data set
     InputData inputSimple(64, 32);
     inputSimple.fill();
     std::cout << " simple " << inputSimple.ActualMean() << " " << inputSimple.ActualStdDev() << std::endl;
 
-#define NR_KERNELS 16
+#define NR_KERNELS 20
     for (int krn = 0; krn < NR_KERNELS; ++krn)
     {
       Output refCPU = convCPU(inputSimple, true, hTimer);
@@ -1370,10 +1407,21 @@ int main(int argc, char** argv) {
   }
   bool once = false;
   std::vector<InputData*> largeInputs;
+  bool lean = true;
+
   for(int k = 0; k < 2; ++k)
   for (int fill = 0; fill < 4+1; ++fill) {
+    if (lean && (fill != 2 && fill != 0)) {
+      continue;
+    }
     for (int avgLenB = 2 << 13; avgLenB > 2; avgLenB >>= 1) {
+      if (lean && (avgLenB != 16 && avgLenB != 256 && avgLenB != 8192)) {
+        continue;
+      }
       for (int i = 0; i < 2; ++i) {
+        if (lean && (i == 1)) {
+          continue;
+        }
         int avgLen = avgLenB + i * ((avgLenB / 2) + 1);
         //printf("...generating input data in CPU mem # %d. %d %d \n", (int) largeInputs.size(), avgLen, fill);
         const int nrStrings = 64 * 256 * 8 * 100 / avgLen;

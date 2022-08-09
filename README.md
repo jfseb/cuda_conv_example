@@ -9,17 +9,32 @@ UTF-8 to UTC32 conversion with cuda
 We use UTF-8 conversion to UChar32 as it is not  completely SIMD, but leads to warp-divergence on non-trivial input.
 
 The basic question was whether one is able demonstrate superior performance
-of a non-warp-divergent implementation of U8_NEXT to beat the default branch based U8_NEXT macro of the ICU.
-(in some cirumstances).
+of a BRANCH-free implementation of U8_NEXT to beat the default branch based U8_NEXT macro of the ICU.
+(in some circumstances).
 
-#
+# summary
+
+Ignoring host-device transfer code, speedups of more than factor 20 can be obtained for a 12MB conversion
+of full uc content esp. for shorter strings compared to a CPU based single threaded conversion.
+
+The respective implementation in general outperforms the CPU implementation over the range also for other content
+(ASCII only), Content with some very long strings. But with less dominance
+
+Using a small output buffer in the stack and writing output in a tight loop significantly enhances throughput.
+
+# details
 
 conversion of a utf-8 encoded arrow style array
 (data memory chunk + offsets array) into UCS32 is compared.
 
-Comparison w.r.t. error handling follows the (full) U_NEXT macros of ICU semantics.
+Comparison w.r.t. error handling follows the (full) U8_NEXT macros of ICU semantics (not U8_NEXT_UNSAFE),
+1. surrogate pairs,
+2. non-minimal encodings,
+3. illegal ranges
 
-   - surrogate pairs, non-minimal encodings, illegal ranges are all flagged ( flawed = true) and replaced by the Unicode Replacement character;
+Also the exact "how many bytes to gobble up" semantics are retained/recreated.
+
+are all flagged (flawed = true) and replaced by the Unicode Replacement character during conversion
 
 for ~12MB of data,
 Comparing a single thread conversion of a (randomise set of 4,3,2,1 byte sequences  + error sequences)
@@ -39,6 +54,10 @@ As expected, all-ASCII or same-input leads to significant speedup due to better 
 Note that the 12MB considered may completely fit into L3 caches of the CPU, thus full latency limits may not be seen.
 
 Obviously CPU conversion may also be parallelized across CPU threads, which is not done here.
+
+CPU performance varies wiht content
+![image](CPU_PERF.jpg)
+
 
 ## GPU conversion
 
@@ -170,8 +189,7 @@ ASCII content, U8_NEXT outperforms NO-Branch implementation at longer length
 
 ![image](FIX_ASCII_NOBR_NEXT.jpg)
 
-CPU performance varies wiht content
-![image](CPU_PERF.jpg)
+
 
 
 Varying length performace:
